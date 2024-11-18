@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -30,6 +32,17 @@ type Bilhete struct {
 	H323DisconnectCause string `json:"h323-disconnect-cause"`
 	NASIPAddress        string `json:"NAS-IP-Address"`
 	AcctStatusType      string `json:"Acct-Status-Type"`
+	Protocol            string `json:"Protocol"`
+	Codec               string `json:"Codec"`
+	RemoteRTPPort       string `json:"Remote-RTP-Port"`
+	RemoteRTPIp         string `json:"Remote-RTP-IP"`
+	RemoteSIPPort       string `json:"Remote-SIP-Port"`
+	RemoteSIPIp         string `json:"Remote-SIP-IP"`
+	LocalRTPPort        string `json:"Local-RTP-Port"`
+	LocalRTPIp          string `json:"Local-RTP-IP"`
+	LocalSIPPort        string `json:"Local-SIP-Port"`
+	LocalSIPIp          string `json:"Local-SIP-IP"`
+	RingStart           string `json:"Ring-Start"`
 }
 
 type BilhetesResponse struct {
@@ -40,6 +53,7 @@ type BilhetesResponse struct {
 	TotalPages  int       `json:"totalPages"`
 }
 
+// TODO fazer mais parametros pra filtrar melhor
 type FilterParams struct {
 	StartDate    string `query:"startDate"`
 	EndDate      string `query:"endDate"`
@@ -52,7 +66,83 @@ type FilterParams struct {
 	PerPage      int    `query:"perPage"`
 }
 
+func convertToTimestamp(value string) (string, error) {
+	if value == "" {
+		cTime := time.Now()
+		return cTime.Format("2006-01-02 15:04:05.000-07:00"), nil
+	}
+	layout := "15:04:05.000 -0700 Mon Jan 02 2006"
+	parsed_time, err := time.Parse(layout, value)
+	if err != nil {
+		return "", fmt.Errorf("Erro convertendo tempo %s, %v", value, err)
+	}
+	return parsed_time.Format("2006-01-02 15:04:05.000-07:00"), nil
+}
+
+func strToInt(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(s)
+}
+
+func hasIP(s string) (string, error) {
+	if s == "" {
+		return "0.0.0.0", nil
+	}
+	return s, nil
+}
+
 func insertBilhete(bilhete *Bilhete) error {
+	h323SetupTime, e := convertToTimestamp(bilhete.H323SetupTime)
+	if e != nil {
+		return e
+	}
+	h323ConnectTime, e := convertToTimestamp(bilhete.H323ConnectTime)
+	if e != nil {
+		return e
+	}
+	h323DisconnectTime, e := convertToTimestamp(bilhete.H323DisconnectTime)
+	if e != nil {
+		return e
+	}
+	fRingStart, e := convertToTimestamp(bilhete.RingStart)
+	if e != nil {
+		return e
+	}
+	remoteRTPPort, e := strToInt(bilhete.RemoteRTPPort)
+	if e != nil {
+		return e
+	}
+	remoteSIPPort, e := strToInt(bilhete.RemoteSIPPort)
+	if e != nil {
+		return e
+	}
+	localRTPPort, e := strToInt(bilhete.LocalRTPPort)
+	if e != nil {
+		return e
+	}
+	localSIPPort, e := strToInt(bilhete.LocalSIPPort)
+	if e != nil {
+		return e
+	}
+	remoteRTPIP, e := hasIP(bilhete.RemoteRTPIp)
+	if e != nil {
+		return e
+	}
+	remoteSIPIP, e := hasIP(bilhete.RemoteSIPIp)
+	if e != nil {
+		return e
+	}
+	localRTPIP, e := hasIP(bilhete.LocalRTPIp)
+	if e != nil {
+		return e
+	}
+	localSIPIP, e := hasIP(bilhete.LocalSIPIp)
+	if e != nil {
+		return e
+	}
+
 	query := `
         INSERT INTO call_records (
             user_name, acct_session_id, calling_station_id, called_station_id,
@@ -60,8 +150,16 @@ func insertBilhete(bilhete *Bilhete) error {
             nas_identifier, cisco_nas_port, h323_call_origin,
             release_source, h323_call_type, call_id,
             acct_session_time, h323_disconnect_cause,
-            nas_ip_address, acct_status_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            nas_ip_address, acct_status_type,
+						protocol, codec, remote_rtp_ip,
+						remote_rtp_port, remote_sip_ip,
+						remote_sip_port, local_rtp_ip,
+						local_rtp_port, local_sip_ip,
+						local_sip_port, ring_start
+        ) VALUES (
+					$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+					$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+				)
         RETURNING id
   `
 	var id int
@@ -70,9 +168,9 @@ func insertBilhete(bilhete *Bilhete) error {
 		bilhete.AcctSessionID,
 		bilhete.CallingStationID,
 		bilhete.CalledStationID,
-		bilhete.H323SetupTime,
-		bilhete.H323ConnectTime,
-		bilhete.H323DisconnectTime,
+		h323SetupTime,
+		h323ConnectTime,
+		h323DisconnectTime,
 		bilhete.NASIdentifier,
 		bilhete.CiscoNASPort,
 		bilhete.H323CallOrigin,
@@ -83,9 +181,20 @@ func insertBilhete(bilhete *Bilhete) error {
 		bilhete.H323DisconnectCause,
 		bilhete.NASIPAddress,
 		bilhete.AcctStatusType,
+		bilhete.Protocol,
+		bilhete.Codec,
+		remoteRTPIP,
+		remoteRTPPort,
+		remoteSIPIP,
+		remoteSIPPort,
+		localRTPIP,
+		localRTPPort,
+		localSIPIP,
+		localSIPPort,
+		fRingStart,
 	).Scan(&id)
-
 	if err != nil {
+		log.Println(err)
 		return fmt.Errorf("Erro ao inserir bilhete %v", err)
 	}
 	log.Printf("Inserido id %d", id)
@@ -159,7 +268,6 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 	args := []interface{}{}
 	argPosition := 1
 
-	// TODO arrumar esses filtros que n tão funcionando direito
 	if filters.StartDate != "" {
 		q.WriteString(fmt.Sprintf(" AND h323_setup_time >= $%d", argPosition))
 		args = append(args, filters.StartDate)
