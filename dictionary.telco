@@ -1,0 +1,30 @@
+# https://docs.telcobridges.com/wiki/Toolpack:RADIUS_CDR_attributes_D
+VENDOR		TelcoBridges				21776
+BEGIN-VENDOR	TelcoBridges
+
+ATTRIBUTE	Telcob-Timestamp			1	string
+ATTRIBUTE	Telcob-LegId				2	integer
+ATTRIBUTE	Telcob-LinkId				3	integer
+ATTRIBUTE	Telcob-Protocol				10	string
+ATTRIBUTE	Telcob-Codec				11	string
+ATTRIBUTE	Telcob-RemoteMediaIP			12	ipaddr
+ATTRIBUTE	Telcob-RemoteMediaPort			13	integer
+ATTRIBUTE	Telcob-MediaInfo			16	integer
+ATTRIBUTE	Telcob-Other-Leg-Id			21	integer
+ATTRIBUTE	Telcob-LocalSipIP			24	ipaddr
+ATTRIBUTE	Telcob-LocalSipPort			25	integer
+ATTRIBUTE	Telcob-LocalMediaIp			26	ipaddr
+ATTRIBUTE	Telcob-LocalMediaPort			27	integer
+ATTRIBUTE	Telcob-LocalMediaInfo			28	string
+ATTRIBUTE	Telcob-RemoteMediaInfo			29	string
+ATTRIBUTE	Telcob-Alert-Time			30	string
+ATTRIBUTE	Telcob-Calling-Presentation		33	string
+ATTRIBUTE	Telcob-MosIngress			38	string
+ATTRIBUTE	Telcob-MosEgress			39	string
+ATTRIBUTE	Telcob-RemoteSipIP			40	ipaddr
+ATTRIBUTE	Telcob-RemoteSipPort			41	integer
+ATTRIBUTE	Telcob-RtpRxPackets			100	integer
+ATTRIBUTE	Telcob-RtpRxVoiceBytes			101	integer
+ATTRIBUTE	Telcob-RtpTxPackets			130	integer
+
+END-VENDOR      TelcoBridges

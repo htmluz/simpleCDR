@@ -43,6 +43,8 @@ type Bilhete struct {
 	LocalSIPPort        string `json:"Local-SIP-Port"`
 	LocalSIPIp          string `json:"Local-SIP-IP"`
 	RingStart           string `json:"Ring-Start"`
+	MosIngress          string `json:"MOS-Ingres"`
+	MosEgress           string `json:"MOS-Egress"`
 }
 
 type BilhetesResponse struct {
@@ -53,15 +55,18 @@ type BilhetesResponse struct {
 	TotalPages  int       `json:"totalPages"`
 }
 
-// TODO fazer mais parametros pra filtrar melhor
 type FilterParams struct {
 	StartDate    string `query:"startDate"`
 	EndDate      string `query:"endDate"`
 	CalledPhone  string `query:"calledPhone"`
 	CallingPhone string `query:"callingPhone"`
 	AnyPhone     string `query:"anyPhone"`
-	UserName     string `query:"userName"`
+	NapA         string `query:"napA"`
+	NapB         string `query:"napB"`
 	DisconnCause string `query:"disconnCause"`
+	CallID       string `query:"callId"`
+	GatewayIP    string `query:"gatewayIp"`
+	Codec        string `query:"codec"`
 	Page         int    `query:"page"`
 	PerPage      int    `query:"perPage"`
 }
@@ -69,7 +74,8 @@ type FilterParams struct {
 func convertToTimestamp(value string) (string, error) {
 	if value == "" {
 		cTime := time.Now()
-		return cTime.Format("2006-01-02 15:04:05.000-07:00"), nil
+		z := cTime.AddDate(-2000, 0, 0)
+		return z.Format("2006-01-02 15:04:05.000-07:00"), nil
 	}
 	layout := "15:04:05.000 -0700 Mon Jan 02 2006"
 	parsed_time, err := time.Parse(layout, value)
@@ -151,15 +157,48 @@ func insertBilhete(bilhete *Bilhete) error {
             release_source, h323_call_type, call_id,
             acct_session_time, h323_disconnect_cause,
             nas_ip_address, acct_status_type,
-						protocol, codec, remote_rtp_ip,
-						remote_rtp_port, remote_sip_ip,
-						remote_sip_port, local_rtp_ip,
+            protocol, codec, remote_rtp_ip,
+            remote_rtp_port, remote_sip_ip,
+            remote_sip_port, local_rtp_ip,
 						local_rtp_port, local_sip_ip,
-						local_sip_port, ring_start
+	          local_sip_port, ring_start,
+						mos_ingress, mos_egress
         ) VALUES (
 					$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-					$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+					$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
 				)
+				ON CONFLICT (call_id)
+				DO UPDATE SET
+					user_name = EXCLUDED.user_name,
+					acct_session_id = EXCLUDED.acct_session_id,
+					calling_station_id = EXCLUDED.calling_station_id,
+					called_station_id = EXCLUDED.called_station_id,
+					h323_setup_time = EXCLUDED.h323_setup_time,
+					h323_connect_time = EXCLUDED.h323_connect_time,
+					h323_disconnect_time = EXCLUDED.h323_disconnect_time,
+					nas_identifier = EXCLUDED.nas_identifier,
+					cisco_nas_port = EXCLUDED.cisco_nas_port,
+					h323_call_origin = EXCLUDED.h323_call_origin,
+					release_source = EXCLUDED.release_source,
+					h323_call_type = EXCLUDED.h323_call_type,
+					call_id = EXCLUDED.call_id,
+					acct_session_time = EXCLUDED.acct_session_time,
+					h323_disconnect_cause = EXCLUDED.h323_disconnect_cause,
+					nas_ip_address = EXCLUDED.nas_ip_address,
+					acct_status_type = EXCLUDED.acct_status_type,
+					protocol = EXCLUDED.protocol,
+					codec = EXCLUDED.codec,
+					remote_rtp_ip = EXCLUDED.remote_rtp_ip,
+					remote_rtp_port = EXCLUDED.remote_rtp_port,
+					remote_sip_ip = EXCLUDED.remote_sip_ip,
+					remote_sip_port = EXCLUDED.remote_sip_port,
+					local_rtp_ip = EXCLUDED.local_rtp_ip,
+					local_rtp_port = EXCLUDED.local_rtp_port,
+					local_sip_ip = EXCLUDED.local_sip_ip,
+					local_sip_port = EXCLUDED.local_sip_port,
+					ring_start = EXCLUDED.ring_start,
+					mos_ingress = EXCLUDED.mos_ingress,
+					mos_egress = EXCLUDED.mos_egress
         RETURNING id
   `
 	var id int
@@ -192,12 +231,14 @@ func insertBilhete(bilhete *Bilhete) error {
 		localSIPIP,
 		localSIPPort,
 		fRingStart,
+		bilhete.MosIngress,
+		bilhete.MosEgress,
 	).Scan(&id)
 	if err != nil {
 		log.Println(err)
 		return fmt.Errorf("Erro ao inserir bilhete %v", err)
 	}
-	log.Printf("Inserido id %d", id)
+	log.Printf("Id %d", id)
 	return nil
 }
 
@@ -209,6 +250,7 @@ func handlePostBilhete(c *fiber.Ctx) error {
 	bilhete := new(Bilhete)
 
 	if err := json.Unmarshal(data, bilhete); err != nil {
+		log.Println(err)
 		log.Fatal("Erro fazendo parsing do json")
 	}
 
@@ -225,7 +267,7 @@ func debugFilters(filters *FilterParams, q string, args []interface{}) {
 	log.Printf("StartDate: '%v'", filters.StartDate)
 	log.Printf("EndDate: '%v'", filters.EndDate)
 	log.Printf("PhoneNumber: '%v'", filters.AnyPhone)
-	log.Printf("UserName: '%v'", filters.UserName)
+	log.Printf("UserName: '%v'", filters.NapA)
 	log.Printf("Page: %d", filters.Page)
 	log.Printf("PerPage: %d", filters.PerPage)
 	log.Printf("\n=== Query Construída ===")
@@ -260,7 +302,12 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 			nas_identifier, cisco_nas_port, h323_call_origin,
 			release_source, h323_call_type, call_id,
 			acct_session_time, h323_disconnect_cause,
-			nas_ip_address, acct_status_type
+			nas_ip_address, acct_status_type, protocol,
+		  codec, remote_rtp_ip, remote_rtp_port,
+		  remote_sip_ip, remote_sip_port,
+		  local_rtp_ip, local_rtp_port,
+		  local_sip_ip, local_sip_port,
+		  ring_start, mos_ingress, mos_egress
 		FROM call_records
 		WHERE 1=1
 	`)
@@ -294,9 +341,34 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 		args = append(args, "%"+filters.AnyPhone+"%")
 		argPosition++
 	}
-	if filters.UserName != "" {
+	if filters.NapA != "" {
 		q.WriteString(fmt.Sprintf(" AND user_name ILIKE $%d", argPosition))
-		args = append(args, "%"+filters.UserName+"%")
+		args = append(args, "%"+filters.NapA+"%")
+		argPosition++
+	}
+	if filters.NapB != "" {
+		q.WriteString(fmt.Sprintf(" AND cisco_nas_port ILIKE $%d", argPosition))
+		args = append(args, "%"+filters.NapB+"%")
+		argPosition++
+	}
+	if filters.DisconnCause != "" {
+		q.WriteString(fmt.Sprintf(" AND h323_disconnect_cause ILIKE $%d", argPosition))
+		args = append(args, "%"+filters.DisconnCause+"%")
+		argPosition++
+	}
+	if filters.CallID != "" {
+		q.WriteString(fmt.Sprintf(" AND call_id ILIKE $%d", argPosition))
+		args = append(args, "%"+filters.CallID+"%")
+		argPosition++
+	}
+	if filters.GatewayIP != "" {
+		q.WriteString(fmt.Sprintf(" AND nas_ip_address ILIKE $%d", argPosition))
+		args = append(args, "%"+filters.GatewayIP+"%")
+		argPosition++
+	}
+	if filters.Codec != "" {
+		q.WriteString(fmt.Sprintf(" AND codec ILIKE $%d", argPosition))
+		args = append(args, "%"+filters.Codec+"%")
 		argPosition++
 	}
 
@@ -347,6 +419,19 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 			&b.H323DisconnectCause,
 			&b.NASIPAddress,
 			&b.AcctStatusType,
+			&b.Protocol,
+			&b.Codec,
+			&b.RemoteRTPIp,
+			&b.RemoteRTPPort,
+			&b.RemoteSIPIp,
+			&b.RemoteSIPPort,
+			&b.LocalRTPIp,
+			&b.LocalRTPPort,
+			&b.LocalSIPIp,
+			&b.LocalSIPPort,
+			&b.RingStart,
+			&b.MosIngress,
+			&b.MosEgress,
 		)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{

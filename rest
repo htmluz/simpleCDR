@@ -1,0 +1,9 @@
+rest {
+	client = "curl"
+	accounting {
+		uri = "http://localhost:5000/bilhetes"
+		method = "post"
+		body = "json"	
+		data = '{"User-Name": "%{User-Name}","Acct-Session-Id": "%{Acct-Session-Id}","Calling-Station-Id": "%{Calling-Station-Id}","Called-Station-Id": "%{Called-Station-Id}","h323-setup-time": "%{h323-setup-time}","h323-connect-time": "%{h323-connect-time}","h323-disconnect-time": "%{h323-disconnect-time}","NAS-Identifier": "%{NAS-Identifier}","Cisco-NAS-Port": "%{Cisco-NAS-Port}","h323-call-origin": "%{h323-call-origin}","release-source": "%{release-source}","h323-call-type": "%{h323-call-type}","call-id": "%{call-id}", "Acct-Session-Time": "%{Acct-Session-Time}","h323-disconnect-cause": "%{h323-disconnect-cause}","NAS-IP-Address": "%{NAS-IP-Address}","Acct-Status-Type": "%{Acct-Status-Type}","Protocol":"%{Telcob-Protocol}","Codec":"%{Telcob-Codec}","Remote-RTP-IP":"%{Telcob-RemoteMediaIP}","Remote-RTP-Port":"%{Telcob-RemoteMediaPort}","Remote-SIP-IP":"%{Telcob-RemoteSipIP}","Remote-SIP-Port":"%{Telcob-RemoteSipPort}","Local-SIP-Port":"%{Telcob-LocalSipPort}","Local-SIP-IP":"%{Telcob-LocalSipIP}","Local-RTP-Port":"%{Telcob-LocalMediaPort}","Local-RTP-IP":"%{Telcob-LocalMediaIP}","Ring-Start":"%{Telcob-Alert-Time}","MOS-Ingress":"%{Telcob-MosIngress}","MOS-Egress":"%{Telcob-MosEgress}"}'
+	}
+}
