@@ -238,19 +238,15 @@ func insertBilhete(bilhete *Bilhete) error {
 		log.Println(err)
 		return fmt.Errorf("Erro ao inserir bilhete %v", err)
 	}
-	log.Printf("Id %d", id)
 	return nil
 }
 
 func handlePostBilhete(c *fiber.Ctx) error {
 	data := c.Body()
-	d := string(data)
-	log.Printf("%s", d)
 
 	bilhete := new(Bilhete)
 
 	if err := json.Unmarshal(data, bilhete); err != nil {
-		log.Println(err)
 		log.Fatal("Erro fazendo parsing do json")
 	}
 
@@ -277,6 +273,55 @@ func debugFilters(filters *FilterParams, q string, args []interface{}) {
 		log.Printf("$%d: %v", i+1, arg)
 	}
 	log.Printf("\n==================")
+}
+
+func handleGetCleanupDays(c *fiber.Ctx) error {
+	type GetDaysResponse struct {
+		Days      int    `json:"days"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	var res GetDaysResponse
+	q := `SELECT cleanup_days, updated_at FROM cleanup_config LIMIT 1;`
+	if err := db.QueryRow(q).Scan(&res.Days, &res.UpdatedAt); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":  "Erro consultando os dias",
+			"detail": err.Error(),
+		})
+	}
+	return c.JSON(res)
+}
+
+func handleUpdateCleanupDays(c *fiber.Ctx) error {
+	type UpdateDaysRequest struct {
+		Days int `json:"days"`
+	}
+	var req UpdateDaysRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error":  "Body inválido",
+			"detail": err.Error(),
+		})
+	}
+	if req.Days <= 30 {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Valor deve ser maior que 30 dias.",
+		})
+	}
+	q := `
+		UPDATE cleanup_config
+		SET cleanup_days = $1, updated_at = NOW()
+		WHERE id = 1;
+	`
+	if _, err := db.Exec(q, req.Days); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":  "Erro ao atualizar cleanup_days",
+			"detail": err.Error(),
+		})
+	}
+	return c.JSON(fiber.Map{
+		"message": "cleanup_days atualizado com sucesso",
+		"days":    req.Days,
+	})
 }
 
 func handleGetBilhetes(c *fiber.Ctx) error {
@@ -372,8 +417,6 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 		argPosition++
 	}
 
-	debugFilters(filters, q.String(), args)
-
 	countQ := fmt.Sprintf("SELECT COUNT(*) FROM (%s) AS count_query", q.String())
 	var total int
 	err := db.QueryRow(countQ, args...).Scan(&total)
@@ -455,6 +498,36 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 	return c.JSON(r)
 }
 
+func autoClean(db *sql.DB, interval time.Duration) {
+	go func() {
+		for {
+			var days int
+			q := `SELECT cleanup_days FROM cleanup_config LIMIT 1;`
+			if err := db.QueryRow(q).Scan(&days); err != nil {
+				log.Printf("Erro ao obter o cleanup_days %v\n", err)
+				time.Sleep(interval)
+				continue
+			}
+			var count int
+			countQ := fmt.Sprintf(`SELECT COUNT(*) FROM call_records WHERE created_at < now() - INTERVAL '%d day'`, days)
+			if err := db.QueryRow(countQ).Scan(&count); err != nil {
+				log.Printf("Erro ao contar a quantia de tickets a serem apagadas %v\n", err)
+				time.Sleep(interval)
+				continue
+			}
+
+			delQ := fmt.Sprintf(`DELETE FROM call_records WHERE created_at < NOW() - INTERVAL '%d day'`, days)
+			if _, err := db.Exec(delQ); err != nil {
+				log.Printf("Erro ao executar a limpeza %v\n", err)
+			} else {
+				log.Printf("Limpeza concluída, %d registros com mais de %d dias apagados", count, days)
+			}
+			time.Sleep(interval)
+			// TODO gravar historico de limpezas
+		}
+	}()
+}
+
 var db *sql.DB
 
 func main() {
@@ -465,6 +538,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	autoClean(db, 24*time.Hour)
+
 	app := fiber.New()
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -474,5 +549,7 @@ func main() {
 
 	app.Post("/bilhetes", handlePostBilhete)
 	app.Get("/bilhetes", handleGetBilhetes)
+	app.Post("/rotinas/limpezadias", handleUpdateCleanupDays)
+	app.Get("/rotinas/limpezadias", handleGetCleanupDays)
 	log.Fatal(app.Listen(":5000"))
 }
