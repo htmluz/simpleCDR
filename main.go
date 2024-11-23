@@ -243,7 +243,6 @@ func insertBilhete(bilhete *Bilhete) error {
 
 func handlePostBilhete(c *fiber.Ctx) error {
 	data := c.Body()
-
 	bilhete := new(Bilhete)
 
 	if err := json.Unmarshal(data, bilhete); err != nil {
