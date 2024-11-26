@@ -11,8 +11,33 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// TODO alterar pra .env
+var jwtSecret = []byte("chavemtsecreta")
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type RegisterRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type Claims struct {
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
 
 type Bilhete struct {
 	UserName            string `json:"User-Name"`
@@ -53,6 +78,11 @@ type BilhetesResponse struct {
 	CurrentPage int       `json:"currentPage"`
 	PerPage     int       `json:"perPage"`
 	TotalPages  int       `json:"totalPages"`
+}
+
+type User struct {
+	User string `json:"username"`
+	Role string `json:"role"`
 }
 
 type FilterParams struct {
@@ -236,9 +266,133 @@ func insertBilhete(bilhete *Bilhete) error {
 	).Scan(&id)
 	if err != nil {
 		log.Println(err)
-		return fmt.Errorf("Erro ao inserir bilhete %v", err)
+		return fmt.Errorf("Error inserting the ticket %v", err)
 	}
 	return nil
+}
+
+func generateAccessToken(username, role string) (string, error) {
+	claims := jwt.MapClaims{
+		"username": username,
+		"role":     role,
+		"exp":      time.Now().Add(15 * time.Minute).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+
+func generateRefreshToken(username string) (string, error) {
+	token := jwt.New(jwt.SigningMethodHS256)
+	claims := token.Claims.(jwt.MapClaims)
+	claims["username"] = username
+	claims["exp"] = time.Now().Add(7 * 24 * time.Hour).Unix()
+	return token.SignedString(jwtSecret)
+}
+
+func handleRegister(c *fiber.Ctx) error {
+	var req RegisterRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error":  "Invalid Request",
+			"detail": err.Error(),
+		})
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating password hash",
+		})
+	}
+	_, err = db.Exec("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)", req.Username, string(hashedPassword), req.Role)
+	if err != nil {
+		return c.Status(409).JSON(fiber.Map{
+			"error": "User already exists",
+		})
+	}
+
+	return c.JSON(fiber.Map{"message": "User created"})
+}
+
+func handlePasswordChange(c *fiber.Ctx) error {
+	type PasswordChangeRequest struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	var req PasswordChangeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid Request",
+		})
+	}
+	userRole := c.Locals("role").(string)
+	userName := c.Locals("username").(string)
+	if userRole != "admin" && userName != req.Username {
+		return c.Status(403).JSON(fiber.Map{
+			"error": "You can only change your own password",
+		})
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating password",
+		})
+	}
+	_, err = db.Exec("UPDATE users SET password_hash = $1 WHERE username = $2", hashedPassword, req.Username)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error updating password",
+		})
+	}
+	return c.JSON(fiber.Map{"message": "Password updated successfully"})
+}
+
+func handleLogin(c *fiber.Ctx) error {
+	var req LoginRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error":  "Invalid request",
+			"detail": err.Error(),
+		})
+	}
+
+	var userID int
+	var passwordHash string
+	var role string
+	err := db.QueryRow("SELECT id, password_hash, role FROM users WHERE username = $1", req.Username).
+		Scan(&userID, &passwordHash, &role)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)) != nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid credentials",
+		})
+	}
+
+	accessToken, err := generateAccessToken(req.Username, role)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating access_token",
+		})
+	}
+	refreshToken, err := generateRefreshToken(req.Username)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating refresh_token",
+		})
+	}
+
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	_, err = db.Exec("INSERT into refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)", userID, refreshToken, expiresAt)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error inserting token into the database",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	})
 }
 
 func handlePostBilhete(c *fiber.Ctx) error {
@@ -283,7 +437,7 @@ func handleGetCleanupDays(c *fiber.Ctx) error {
 	q := `SELECT cleanup_days, updated_at FROM cleanup_config LIMIT 1;`
 	if err := db.QueryRow(q).Scan(&res.Days, &res.UpdatedAt); err != nil {
 		return c.Status(500).JSON(fiber.Map{
-			"error":  "Erro consultando os dias",
+			"error":  "Error consulting the days",
 			"detail": err.Error(),
 		})
 	}
@@ -297,13 +451,13 @@ func handleUpdateCleanupDays(c *fiber.Ctx) error {
 	var req UpdateDaysRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{
-			"error":  "Body inválido",
+			"error":  "Invalid body",
 			"detail": err.Error(),
 		})
 	}
 	if req.Days <= 30 {
 		return c.Status(400).JSON(fiber.Map{
-			"error": "Valor deve ser maior que 30 dias.",
+			"error": "Value must be smaller than 30 days",
 		})
 	}
 	q := `
@@ -313,12 +467,12 @@ func handleUpdateCleanupDays(c *fiber.Ctx) error {
 	`
 	if _, err := db.Exec(q, req.Days); err != nil {
 		return c.Status(500).JSON(fiber.Map{
-			"error":  "Erro ao atualizar cleanup_days",
+			"error":  "Error updating cleanup_days",
 			"detail": err.Error(),
 		})
 	}
 	return c.JSON(fiber.Map{
-		"message": "cleanup_days atualizado com sucesso",
+		"message": "cleanup_days updated successfully",
 		"days":    req.Days,
 	})
 }
@@ -327,15 +481,15 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 	filters := new(FilterParams)
 	if err := c.QueryParser(filters); err != nil {
 		return c.Status(400).JSON(fiber.Map{
-			"error":  "Parâmetros inválidos",
+			"error":  "Invalid parameters",
 			"detail": err.Error(),
 		})
 	}
 	if filters.Page < 1 {
 		filters.Page = 1
 	}
-	if filters.PerPage < 1 || filters.PerPage > 100 {
-		filters.PerPage = 20
+	if filters.PerPage < 1 || filters.PerPage > 500 {
+		filters.PerPage = 25
 	}
 
 	q := strings.Builder{}
@@ -421,7 +575,7 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 	err := db.QueryRow(countQ, args...).Scan(&total)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
-			"error":   "Erro ao contar os registros",
+			"error":   "Error counting records",
 			"details": err.Error(),
 		})
 	}
@@ -434,7 +588,7 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 	rows, err := db.Query(q.String(), args...)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
-			"error":   "Erro ao buscar os registros",
+			"error":   "Error searching for records",
 			"details": err.Error(),
 		})
 	}
@@ -477,7 +631,7 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 		)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{
-				"error":   "Erro lendo os registros",
+				"error":   "Error reading records",
 				"details": err.Error(),
 			})
 		}
@@ -495,6 +649,144 @@ func handleGetBilhetes(c *fiber.Ctx) error {
 		TotalPages:  totalPages,
 	}
 	return c.JSON(r)
+}
+
+func handleRefreshToken(c *fiber.Ctx) error {
+	var req RefreshRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request",
+		})
+	}
+	var userID int
+	var expiresAt time.Time
+	err := db.QueryRow("SELECT user_id, expires_at FROM refresh_tokens WHERE token = $1", req.RefreshToken).
+		Scan(&userID, &expiresAt)
+	if err == sql.ErrNoRows {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid refresh_token",
+		})
+	} else if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Database error",
+		})
+	}
+	if time.Now().After(expiresAt) {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Expired refresh_token",
+		})
+	}
+	expiresAt = time.Now().Add(-1 * time.Minute)
+	db.QueryRow("UPDATE refresh_tokens SET expires_at = $1 WHERE token = $2", expiresAt, req.RefreshToken)
+
+	var userRole string
+	var username string
+	err = db.QueryRow("SELECT username, role FROM users WHERE id = $1", userID).Scan(&username, &userRole)
+	if err == sql.ErrNoRows {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	} else if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":   "Database error",
+			"details": err.Error(),
+		})
+	}
+	accessToken, err := generateAccessToken(username, userRole)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating new access_token",
+		})
+	}
+	refreshToken, err := generateRefreshToken(username)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Error generating new refresh_token",
+		})
+	}
+	expiresAt = time.Now().Add(7 * 24 * time.Hour)
+	_, err = db.Exec("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)", userID, refreshToken, expiresAt)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":   "Database error",
+			"details": err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+	})
+}
+
+func handleGetUsers(c *fiber.Ctx) error {
+	var res []User
+	r, err := db.Query("SELECT username, role FROM users")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":  "Database error",
+			"datils": err.Error(),
+		})
+	}
+	defer r.Close()
+	for r.Next() {
+		var user User
+		if err := r.Scan(&user.User, &user.Role); err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Error parsing user data",
+			})
+		}
+		res = append(res, user)
+	}
+	return c.JSON(res)
+}
+
+func roleMiddleware(allowedRoles ...string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userRole := c.Locals("role").(string)
+		for _, role := range allowedRoles {
+			if role == userRole {
+				return c.Next()
+			}
+		}
+		return c.Status(403).JSON(fiber.Map{
+			"error": "Forbidden",
+		})
+	}
+}
+
+func authMiddleware(c *fiber.Ctx) error {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid token",
+		})
+	}
+
+	tokenString := authHeader[len("Bearer "):]
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("método de entrada inesperado %v", token.Header["alg"])
+		}
+		return []byte(jwtSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid token",
+		})
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || claims["role"] == nil {
+		return c.Status(401).JSON(fiber.Map{
+			"error": "Invalid token",
+		})
+	}
+
+	c.Locals("role", claims["role"].(string))
+	c.Locals("username", claims["username"].(string))
+	return c.Next()
 }
 
 func autoClean(db *sql.DB, interval time.Duration) {
@@ -546,8 +838,15 @@ func main() {
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
 
+	app.Post("/login", handleLogin)
+	app.Post("/register", handleRegister)
+	app.Post("/refresh", handleRefreshToken)
+	app.Get("/users", handleGetUsers)
+	app.Post("/user/password", authMiddleware, roleMiddleware("user", "admin"), handlePasswordChange)
+
 	app.Post("/bilhetes", handlePostBilhete)
-	app.Get("/bilhetes", handleGetBilhetes)
+	app.Get("/bilhetes", authMiddleware, roleMiddleware("user", "admin"), handleGetBilhetes)
+
 	app.Post("/rotinas/limpezadias", handleUpdateCleanupDays)
 	app.Get("/rotinas/limpezadias", handleGetCleanupDays)
 	log.Fatal(app.Listen(":5000"))
