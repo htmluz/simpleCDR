@@ -692,20 +692,20 @@ func handleRefreshToken(c *fiber.Ctx) error {
 			"details": err.Error(),
 		})
 	}
-	accessToken, err := generateAccessToken(username, userRole)
+	newAccessToken, err := generateAccessToken(username, userRole)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Error generating new access_token",
 		})
 	}
-	refreshToken, err := generateRefreshToken(username)
+	newRefreshToken, err := generateRefreshToken(username)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Error generating new refresh_token",
 		})
 	}
 	expiresAt = time.Now().Add(7 * 24 * time.Hour)
-	_, err = db.Exec("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)", userID, refreshToken, expiresAt)
+	_, err = db.Exec("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)", userID, newRefreshToken, expiresAt)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error":   "Database error",
@@ -714,8 +714,8 @@ func handleRefreshToken(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"access_token":  accessToken,
-		"refresh_token": refreshToken,
+		"access_token":  newAccessToken,
+		"refresh_token": newRefreshToken,
 	})
 }
 
@@ -839,15 +839,15 @@ func main() {
 	}))
 
 	app.Post("/login", handleLogin)
-	app.Post("/register", handleRegister)
 	app.Post("/refresh", handleRefreshToken)
-	app.Get("/users", handleGetUsers)
+	app.Post("/register", authMiddleware, roleMiddleware("admin"), handleRegister)
+	app.Get("/users", authMiddleware, roleMiddleware("user", "admin"), handleGetUsers)
 	app.Post("/user/password", authMiddleware, roleMiddleware("user", "admin"), handlePasswordChange)
 
 	app.Post("/bilhetes", handlePostBilhete)
 	app.Get("/bilhetes", authMiddleware, roleMiddleware("user", "admin"), handleGetBilhetes)
 
-	app.Post("/rotinas/limpezadias", handleUpdateCleanupDays)
-	app.Get("/rotinas/limpezadias", handleGetCleanupDays)
+	app.Post("/rotinas/limpezadias", authMiddleware, roleMiddleware("admin"), handleUpdateCleanupDays)
+	app.Get("/rotinas/limpezadias", authMiddleware, roleMiddleware("admin"), handleGetCleanupDays)
 	log.Fatal(app.Listen(":5000"))
 }
