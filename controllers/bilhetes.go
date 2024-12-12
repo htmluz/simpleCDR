@@ -22,6 +22,8 @@ func HandlePostBilhete(db *sql.DB) fiber.Handler {
 			log.Fatal("Erro fazendo parsing do json")
 		}
 
+		// service de inserir na fila o bilhete
+		// esse insertbilhete vai lá pro service da fila, só quando for fechado o acct-status-type
 		err := services.InsertBilhete(db, bilhete)
 		if err != nil {
 			log.Fatal("Erro ao inserir bilhete")

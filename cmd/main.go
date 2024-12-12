@@ -24,6 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 
 	services.AutoClean(db, 24*time.Hour)
 
@@ -42,6 +43,10 @@ func main() {
 
 	app.Post("/bilhetes", controllers.HandlePostBilhete(db))
 	app.Get("/bilhetes", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandleGetBilhetes(db))
+	app.Get("/bilhetes/live", controllers.EventStream)
+
+	app.Get("/testeq", controllers.GetQ)
+	app.Post("/testeq", controllers.InsertIntoQ(db))
 
 	app.Post("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleUpdateCleanupDays(db))
 	app.Get("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleGetCleanupDays(db))
