@@ -13,7 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func HandlePostBilhete(db *sql.DB) fiber.Handler {
+func HandlePostBilhete(db *sql.DB, q *services.CallQueue) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		data := c.Body()
 		bilhete := new(models.Bilhete)
@@ -21,14 +21,7 @@ func HandlePostBilhete(db *sql.DB) fiber.Handler {
 		if err := json.Unmarshal(data, bilhete); err != nil {
 			log.Fatal("Erro fazendo parsing do json")
 		}
-
-		// service de inserir na fila o bilhete
-		// esse insertbilhete vai lá pro service da fila, só quando for fechado o acct-status-type
-		err := services.InsertBilhete(db, bilhete)
-		if err != nil {
-			log.Fatal("Erro ao inserir bilhete")
-		}
-
+		q.Add(bilhete)
 		return c.SendStatus(201)
 	}
 }

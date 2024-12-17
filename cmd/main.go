@@ -27,6 +27,8 @@ func main() {
 	defer db.Close()
 
 	services.AutoClean(db, 24*time.Hour)
+	q := services.NewCallQueue(db)
+	q.QueueCleanup(1 * time.Minute)
 
 	app := fiber.New()
 	app.Use(cors.New(cors.Config{
@@ -41,12 +43,9 @@ func main() {
 	app.Get("/users", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandleGetUsers(db))
 	app.Post("/user/password", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandlePasswordChange(db))
 
-	app.Post("/bilhetes", controllers.HandlePostBilhete(db))
+	app.Post("/bilhetes", controllers.HandlePostBilhete(db, q))
 	app.Get("/bilhetes", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandleGetBilhetes(db))
-	app.Get("/bilhetes/live", controllers.EventStream)
-
-	app.Get("/testeq", controllers.GetQ)
-	app.Post("/testeq", controllers.InsertIntoQ(db))
+	app.Get("/bilhetes/live", controllers.EventStream(q))
 
 	app.Post("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleUpdateCleanupDays(db))
 	app.Get("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleGetCleanupDays(db))

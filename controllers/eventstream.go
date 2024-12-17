@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"radiusgo/services"
 	"time"
 
@@ -12,33 +11,33 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func EventStream(c *fiber.Ctx) error {
-	c.Set("Content-Type", "text/event-stream")
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
+func EventStream(q *services.CallQueue) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "text/event-stream")
+		c.Set("Cache-Control", "no-cache")
+		c.Set("Connection", "keep-alive")
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
 
-	c.Status(fiber.StatusOK).Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
-		for {
-			calls, count := services.GetActiveCalls()
-			callsjson, e := json.Marshal(calls)
-			if e != nil {
-				log.Printf("erro serializando o json %v", e)
-				return
+		c.Status(fiber.StatusOK).Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
+			for {
+				count := q.GetQueueSize()
+				calls := q.GetAllCalls()
+				jcalls, e := json.Marshal(calls)
+				if e != nil {
+					fmt.Printf("error serializing json calls %v", e)
+				}
+				fmt.Fprintf(w, "data: {\"count\": %d, \"calls\": %s}\n\n", count, jcalls)
+
+				err := w.Flush()
+				if err != nil {
+					break
+				}
+				time.Sleep(2000 * time.Millisecond)
 			}
-			msg := fmt.Sprintf("data: {\"calls\": %s, \"count\": %v}\n\n", callsjson, count)
-			fmt.Fprintf(w, "data: {%s}\n\n", msg)
+		}))
+		return nil
+	}
 
-			err := w.Flush()
-			if err != nil {
-				fmt.Printf("closing http conn, %v", err)
-				break
-			}
-			time.Sleep(1 * time.Second)
-		}
-	}))
-
-	return nil
 }

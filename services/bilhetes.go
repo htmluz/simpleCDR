@@ -8,6 +8,38 @@ import (
 	"radiusgo/utils"
 )
 
+func InsertBid(db *sql.DB, bilh models.BilheteFull) error {
+	var callIDa, callIDb interface{}
+	if bilh.LegA != nil && bilh.LegA.CallID != "" {
+		callIDa = bilh.LegA.CallID
+	}
+	if bilh.LegB != nil && bilh.LegB.CallID != "" {
+		callIDb = bilh.LegB.CallID
+	}
+
+	_, err := db.Exec(
+		`INSERT INTO bilhetes (bid, lega, legb) VALUES ($1, $2, $3)
+		ON CONFLICT (bid) 
+		DO UPDATE SET lega = COALESCE(EXCLUDED.lega, bilhetes.lega),
+		legb = COALESCE(EXCLUDED.legb, bilhetes.legb)
+		`, bilh.Bid, callIDa, callIDb)
+	if err != nil {
+		log.Println(err)
+		return fmt.Errorf("Error inserting the ticket %v", err)
+	}
+	return nil
+}
+
+func BidExists(db *sql.DB, bid string) bool {
+	var exists bool
+	err := db.QueryRow(`SELECT COUNT(*) > 0 FROM bilhetes WHERE bid = $1`, bid).Scan(&exists)
+	if err != nil {
+		fmt.Println("erro query exists ", err)
+		return false
+	}
+	return exists
+}
+
 func InsertBilhete(db *sql.DB, bilhete *models.Bilhete) error {
 	h323SetupTime, e := utils.ConvertToTimestamp(bilhete.H323SetupTime)
 	if e != nil {

@@ -5,66 +5,110 @@ import (
 	"fmt"
 	"radiusgo/models"
 	"sync"
+	"time"
 )
 
-var (
-	callQueue = make(map[string]*models.Bilhete)
-	queueLock = sync.RWMutex{}
-)
-
-func AddCall(call *models.Bilhete) {
-	queueLock.Lock()
-	defer queueLock.Unlock()
-	callQueue[call.CallID] = call
+type CallQueue struct {
+	mu    sync.RWMutex
+	bilhs map[string]*models.BilheteFull
+	db    *sql.DB
 }
 
-func UpdateCall(updatedCall *models.Bilhete) {
-	queueLock.Lock()
-	defer queueLock.Unlock()
+func generateUniqueKey(bilh *models.Bilhete) string {
+	layout := "15:04:05.000 -0700 Mon Jan 2 2006"
+	setupTime, err := time.Parse(layout, bilh.H323SetupTime)
+	if err != nil {
+		fmt.Printf("Erro parseando time %v\n", err)
+		return ""
+	}
+	roundedTime := setupTime.Truncate(10 * time.Second)
+	return fmt.Sprintf("%s|%s|%s|%s",
+		bilh.CallingStationID,
+		bilh.UserName,
+		roundedTime.Format("2006-01-02T15:04:05"),
+		"2sOffset")
+}
 
-	if existingCall, exists := callQueue[updatedCall.CallID]; exists {
-		*existingCall = *updatedCall
-	} else {
-		callQueue[updatedCall.CallID] = updatedCall
+func NewCallQueue(db *sql.DB) *CallQueue {
+	return &CallQueue{
+		bilhs: make(map[string]*models.BilheteFull),
+		db:    db,
 	}
 }
 
-// tem que mudar o tratamento pra identificar as duas pernas e gerar uma chamada relacionada
-// leg a e leg b
-
-func RemoveCall(db *sql.DB, call *models.Bilhete) {
-	queueLock.Lock()
-	defer queueLock.Unlock()
-	if existingCall, exists := callQueue[call.CallID]; exists {
-		*existingCall = *call
-	} else {
-		fmt.Print("tentou deletar chamada q n tinha")
-	}
-	InsertBilhete(db, call)
-	delete(callQueue, call.CallID)
-}
-
-func GetActiveCalls() ([]*models.Bilhete, int) {
-	queueLock.RLock()
-	defer queueLock.RUnlock()
-	activeCalls := []*models.Bilhete{}
-	for _, call := range callQueue {
-		activeCalls = append(activeCalls, call)
-	}
-	return activeCalls, len(activeCalls)
-}
-
-func QueueHandleBilhete(db *sql.DB, call *models.Bilhete) {
-	_, exists := callQueue[call.CallID]
-	fmt.Println(call.AcctStatusType)
-	switch call.AcctStatusType {
-	case "Start":
-		if !exists {
-			AddCall(call)
-		} else {
-			UpdateCall(call)
+func (q *CallQueue) Add(bilh *models.Bilhete) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	bilhKey := generateUniqueKey(bilh)
+	fmt.Print(bilhKey, "\n")
+	if _, ok := q.bilhs[bilhKey]; !ok {
+		q.bilhs[bilhKey] = &models.BilheteFull{
+			Bid:  bilhKey,
+			LegA: &models.Bilhete{},
+			LegB: &models.Bilhete{},
 		}
-	case "Stop":
-		RemoveCall(db, call)
 	}
+
+	if bilh.AcctStatusType == "Start" {
+		if bilh.H323CallOrigin == "answer" {
+			q.bilhs[bilhKey].LegA = bilh
+		} else if bilh.H323CallOrigin == "originate" {
+			q.bilhs[bilhKey].LegB = bilh
+		}
+	} else if bilh.AcctStatusType == "Stop" {
+		if bilh.H323CallOrigin == "answer" {
+			q.bilhs[bilhKey].LegA = bilh
+			InsertBilhete(q.db, bilh)
+			InsertBid(q.db, *q.bilhs[bilhKey])
+		} else {
+			q.bilhs[bilhKey].LegB = bilh
+			InsertBilhete(q.db, bilh)
+			InsertBid(q.db, *q.bilhs[bilhKey])
+		}
+		if q.bilhs[bilhKey].LegA.AcctStatusType == "Stop" && q.bilhs[bilhKey].LegB.AcctStatusType == "Stop" {
+			InsertBid(q.db, *q.bilhs[bilhKey])
+			delete(q.bilhs, bilhKey)
+		}
+	}
+}
+
+// funcao de rotina pra limpar a queue
+// trato os start e stops desordenados por aqui
+func (q *CallQueue) QueueCleanup(interval time.Duration) {
+	go func() {
+		for {
+			q.mu.Lock()
+			copyMap := make(map[string]*models.BilheteFull, len(q.bilhs))
+			for k, v := range q.bilhs {
+				copyMap[k] = v
+			}
+			q.mu.Unlock()
+
+			for k := range copyMap {
+				if BidExists(q.db, copyMap[k].Bid) {
+					// valida se o id do bilhete ja ta no banco, ocorre quando os stop vem antes do start
+					q.mu.Lock()
+					delete(q.bilhs, copyMap[k].Bid)
+					q.mu.Unlock()
+				}
+			}
+			time.Sleep(interval)
+		}
+	}()
+}
+
+func (q *CallQueue) GetQueueSize() int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return len(q.bilhs)
+}
+
+func (q *CallQueue) GetAllCalls() []models.BilheteFull {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	var calls []models.BilheteFull
+	for _, bilhete := range q.bilhs {
+		calls = append(calls, *bilhete)
+	}
+	return calls
 }

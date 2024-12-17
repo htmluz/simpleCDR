@@ -57,3 +57,9 @@ type FilterParams struct {
 	Page         int    `query:"page"`
 	PerPage      int    `query:"perPage"`
 }
+
+type BilheteFull struct {
+	Bid  string `json:"Bid"`
+	LegA *Bilhete
+	LegB *Bilhete
+}
