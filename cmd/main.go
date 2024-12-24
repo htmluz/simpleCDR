@@ -28,7 +28,7 @@ func main() {
 
 	services.AutoClean(db, 24*time.Hour)
 	q := services.NewCallQueue(db)
-	q.QueueCleanup(1 * time.Minute)
+	q.QueueCleanup(30 * time.Second)
 
 	app := fiber.New()
 	app.Use(cors.New(cors.Config{

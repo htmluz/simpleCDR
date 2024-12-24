@@ -8,7 +8,7 @@ import (
 	"radiusgo/utils"
 )
 
-func InsertBid(db *sql.DB, bilh models.BilheteFull) error {
+func InsertBid(db *sql.DB, bilh *models.BilheteFull) error {
 	var callIDa, callIDb interface{}
 	if bilh.LegA != nil && bilh.LegA.CallID != "" {
 		callIDa = bilh.LegA.CallID
@@ -35,6 +35,16 @@ func BidExists(db *sql.DB, bid string) bool {
 	err := db.QueryRow(`SELECT COUNT(*) > 0 FROM bilhetes WHERE bid = $1`, bid).Scan(&exists)
 	if err != nil {
 		fmt.Println("erro query exists ", err)
+		return false
+	}
+	return exists
+}
+
+func CallIDExists(db *sql.DB, callID string) bool {
+	var exists bool
+	err := db.QueryRow(`SELECT COUNT(*) > 0 FROM call_records WHERE call_id = $1`, callID).Scan(&exists)
+	if err != nil {
+		fmt.Println(err)
 		return false
 	}
 	return exists
@@ -142,6 +152,7 @@ func InsertBilhete(db *sql.DB, bilhete *models.Bilhete) error {
 					mos_egress = EXCLUDED.mos_egress
         RETURNING id
   `
+
 	var id int
 	err := db.QueryRow(query,
 		bilhete.UserName,

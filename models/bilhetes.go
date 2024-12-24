@@ -1,5 +1,7 @@
 package models
 
+import "sync"
+
 type Bilhete struct {
 	UserName            string `json:"User-Name"`
 	AcctSessionID       string `json:"Acct-Session-Id"`
@@ -59,6 +61,7 @@ type FilterParams struct {
 }
 
 type BilheteFull struct {
+	sync.Mutex
 	Bid  string `json:"Bid"`
 	LegA *Bilhete
 	LegB *Bilhete
