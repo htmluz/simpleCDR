@@ -13,7 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func HandlePostBilhete(db *sql.DB, q *services.CallQueue) fiber.Handler {
+func HandlePostBilhete(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		data := c.Body()
 		bilhete := new(models.Bilhete)
@@ -21,7 +21,12 @@ func HandlePostBilhete(db *sql.DB, q *services.CallQueue) fiber.Handler {
 		if err := json.Unmarshal(data, bilhete); err != nil {
 			log.Fatal("Erro fazendo parsing do json")
 		}
-		q.Add(bilhete)
+
+		err := services.InsertBilhete(db, bilhete)
+		if err != nil {
+			log.Fatal("Erro inserindo bilhete")
+		}
+
 		return c.SendStatus(201)
 	}
 }
