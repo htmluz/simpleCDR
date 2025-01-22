@@ -23,7 +23,7 @@ func convertTimestamp(dateStr string) (string, error) {
 }
 
 func BuildLokiQuery(filters *models.FilterParamsHomer) (string, error) {
-	baseQuery := `{job="heplify-server", method!="REGISTER"}`
+	baseQuery := `{job="heplify-server"}`
 	var conditions []string
 
 	if filters.CalledPhone != "" {
@@ -36,7 +36,7 @@ func BuildLokiQuery(filters *models.FilterParamsHomer) (string, error) {
 		conditions = append(conditions, fmt.Sprintf(`|= "%s"`, filters.AnyPhone))
 	}
 	if filters.CallID != "" {
-		conditions = append(conditions, fmt.Sprintf(`|= "%s"`, filters.CallID))
+		baseQuery = fmt.Sprintf(`{job="heplify-server", call_id="%s"}`, filters.CallID)
 	}
 	if filters.Domain != "" {
 		conditions = append(conditions, fmt.Sprintf(`|= "%s"`, filters.Domain))
