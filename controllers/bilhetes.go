@@ -31,6 +31,88 @@ func HandlePostBilhete(db *sql.DB) fiber.Handler {
 	}
 }
 
+func HandleGetBilheteByCallID(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		callID := c.Params("call_id")
+		if callID == "" {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "call_id necessario pra busca",
+			})
+		}
+		q := strings.Builder{}
+
+		q.WriteString(`
+    SELECT 
+      cr.user_name, cr.acct_session_id, cr.calling_station_id, cr.called_station_id,
+      cr.h323_setup_time, cr.h323_connect_time, cr.h323_disconnect_time,
+      cr.nas_identifier, cr.cisco_nas_port, cr.h323_call_origin,
+      cr.release_source, cr.h323_call_type, cr.call_id,
+      cr.acct_session_time, cr.h323_disconnect_cause,
+      cr.nas_ip_address, cr.acct_status_type, cr.protocol,
+      cr.codec, cr.remote_rtp_ip, cr.remote_rtp_port,
+      cr.remote_sip_ip, cr.remote_sip_port,
+      cr.local_rtp_ip, cr.local_rtp_port,
+      cr.local_sip_ip, cr.local_sip_port,
+      cr.ring_start, cr.mos_ingress, cr.mos_egress,
+      COALESCE(g.name, '') AS gwname
+    FROM call_records cr
+    LEFT JOIN gateways g
+    ON cr.nas_ip_address::inet = g.ip
+    WHERE cr.call_id = $1
+    `)
+
+		var bilhete models.Bilhete
+		err := db.QueryRow(q.String(), callID).Scan(
+			&bilhete.UserName,
+			&bilhete.AcctSessionID,
+			&bilhete.CallingStationID,
+			&bilhete.CalledStationID,
+			&bilhete.H323SetupTime,
+			&bilhete.H323ConnectTime,
+			&bilhete.H323DisconnectTime,
+			&bilhete.NASIdentifier,
+			&bilhete.CiscoNASPort,
+			&bilhete.H323CallOrigin,
+			&bilhete.ReleaseSource,
+			&bilhete.H323CallType,
+			&bilhete.CallID,
+			&bilhete.AcctSessionTime,
+			&bilhete.H323DisconnectCause,
+			&bilhete.NASIPAddress,
+			&bilhete.AcctStatusType,
+			&bilhete.Protocol,
+			&bilhete.Codec,
+			&bilhete.RemoteRTPIp,
+			&bilhete.RemoteRTPPort,
+			&bilhete.RemoteSIPIp,
+			&bilhete.RemoteSIPPort,
+			&bilhete.LocalRTPIp,
+			&bilhete.LocalRTPPort,
+			&bilhete.LocalSIPIp,
+			&bilhete.LocalSIPPort,
+			&bilhete.RingStart,
+			&bilhete.MosIngress,
+			&bilhete.MosEgress,
+			&bilhete.GwName,
+		)
+
+		if err == sql.ErrNoRows {
+			return c.Status(404).JSON(fiber.Map{
+				"error": "Bilhete não encontrado",
+			})
+		}
+
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error":  "Erro consultando bilhete",
+				"detail": err.Error(),
+			})
+		}
+
+		return c.JSON(bilhete)
+	}
+}
+
 // TODO moodularizar
 func HandleGetBilhetes(db *sql.DB) fiber.Handler {
 	return func(c *fiber.Ctx) error {

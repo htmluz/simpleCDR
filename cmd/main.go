@@ -15,7 +15,10 @@ import (
 
 var jwtSecret = []byte("chavemtsecreta")
 
-var db *sql.DB
+var (
+	db       *sql.DB
+	db_homer *sql.DB
+)
 
 func main() {
 	conn := "postgres://postgres:12345@localhost:5432/radius?sslmode=disable"
@@ -25,6 +28,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	conn_homer := "postgres://homer:homer@localhost:5434/homer?sslmode=disable"
+	var er error
+	db_homer, er = sql.Open("postgres", conn_homer)
+	if er != nil {
+		log.Fatal(er)
+	}
+	defer db_homer.Close()
 
 	services.AutoClean(db, 24*time.Hour)
 
@@ -43,8 +54,10 @@ func main() {
 
 	app.Post("/bilhetes", controllers.HandlePostBilhete(db))
 	app.Get("/bilhetes", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandleGetBilhetes(db))
+	app.Get("/bilhete/:call_id", middlewares.AuthMiddleware, middlewares.RoleMiddleware("user", "admin"), controllers.HandleGetBilheteByCallID(db))
 
-	app.Get("/homer", controllers.HandleGetHomerCalls)
+	app.Get("/homer", controllers.HandleGetHomerCalls(db_homer))
+	app.Get("/homer/:call_id", controllers.HandleGetMessages(db_homer))
 
 	app.Post("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleUpdateCleanupDays(db))
 	app.Get("/rotinas/limpezadias", middlewares.AuthMiddleware, middlewares.RoleMiddleware("admin"), controllers.HandleGetCleanupDays(db))
