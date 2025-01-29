@@ -45,8 +45,8 @@ type HomerMessageProtocolHeader struct {
 }
 
 type HomerResponse struct {
-	CallID   string        `json:"call_id"`
-	Messages []interface{} `json:"messages"`
+	CallID   string         `json:"call_id"`
+	Messages []HomerMessage `json:"messages"`
 }
 
 type HomerDataHeaderRTCP struct {
@@ -68,6 +68,13 @@ type HomerRTCPMessage struct {
 	DataHeader     HomerDataHeaderRTCP        `json:"data_header"`
 	Raw            RTCPRaw                    `json:"raw"`
 	Type           string                     `json:"type"`
+}
+
+type RTCPFlow struct {
+	Type     string             `json:"type"`
+	SrcIP    string             `json:"src_ip"`
+	DstIP    string             `json:"dst_ip"`
+	Messages []HomerRTCPMessage `json:"messages"`
 }
 
 type RTCPRaw struct {
@@ -109,4 +116,28 @@ type RTCPReportBlocksXr struct {
 	GapDuration     int `json:"gap_duration"`
 	RountTripDelay  int `json:"round_trip_delay"`
 	EndSystemDelay  int `json:"end_system_delay"`
+}
+
+type HomerMessage interface {
+	GetCreateDate() time.Time
+	GetType() string
+}
+
+func (m HomerSIPMessage) GetCreateDate() time.Time {
+	return m.CreateDate
+}
+
+func (m HomerSIPMessage) GetType() string {
+	return m.Type
+}
+
+func (f RTCPFlow) GetCreateDate() time.Time {
+	if len(f.Messages) > 0 {
+		return f.Messages[0].CreateDate
+	}
+	return time.Time{}
+}
+
+func (f RTCPFlow) GetType() string {
+	return "rtcp_flow"
 }

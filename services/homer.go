@@ -108,38 +108,21 @@ func GetHomerMessages(callID string, db *sql.DB) models.HomerResponse {
 		log.Fatalf("Erro msg sip %v", err)
 	}
 
-	rtcpMsgs, err := getRTCPMessages(callID, db)
+	rtcpFlows, err := getRTCPFlows(callID, db)
 	if err != nil {
-		log.Fatalf("Erro msg rtcp %v", err)
+		log.Fatalf("erro msg rtcp %v", err)
 	}
 
-	allMessages := make([]interface{}, 0, len(sipMsgs)+len(rtcpMsgs))
+	allMessages := make([]models.HomerMessage, 0, len(sipMsgs)+len(rtcpFlows))
 	for _, msg := range sipMsgs {
 		allMessages = append(allMessages, msg)
 	}
-	for _, msg := range rtcpMsgs {
-		allMessages = append(allMessages, msg)
+	for _, flow := range rtcpFlows {
+		allMessages = append(allMessages, flow)
 	}
 
 	sort.Slice(allMessages, func(i, j int) bool {
-		var dateI, dateJ time.Time
-
-		switch msg := allMessages[i].(type) {
-		case models.HomerSIPMessage:
-			dateI = msg.CreateDate
-
-		case models.HomerRTCPMessage:
-			dateI = msg.CreateDate
-		}
-
-		switch msg := allMessages[j].(type) {
-		case models.HomerSIPMessage:
-			dateJ = msg.CreateDate
-		case models.HomerRTCPMessage:
-			dateJ = msg.CreateDate
-		}
-
-		return dateI.Before(dateJ)
+		return allMessages[i].GetCreateDate().Before(allMessages[j].GetCreateDate())
 	})
 
 	messages := models.HomerResponse{
@@ -236,4 +219,39 @@ func getRTCPMessages(CallID string, db *sql.DB) ([]models.HomerRTCPMessage, erro
 		})
 	}
 	return messages, nil
+}
+
+func getRTCPFlows(CallID string, db *sql.DB) ([]models.RTCPFlow, error) {
+	messages, err := getRTCPMessages(CallID, db)
+	if err != nil {
+		return nil, err
+	}
+
+	flowMap := make(map[string]*models.RTCPFlow)
+
+	for _, msg := range messages {
+		key := fmt.Sprintf("%s-%s",
+			msg.ProtocolHeader.SrcIP,
+			msg.ProtocolHeader.DstIP)
+		if _, exists := flowMap[key]; !exists {
+			flowMap[key] = &models.RTCPFlow{
+				Type:  "rtcp_flow",
+				SrcIP: msg.ProtocolHeader.SrcIP,
+				DstIP: msg.ProtocolHeader.DstIP,
+
+				Messages: []models.HomerRTCPMessage{},
+			}
+		}
+		flowMap[key].Messages = append(flowMap[key].Messages, msg)
+	}
+
+	flows := make([]models.RTCPFlow, 0, len(flowMap))
+	for _, flow := range flowMap {
+		sort.Slice(flow.Messages, func(i, j int) bool {
+			return flow.Messages[i].CreateDate.Before(flow.Messages[j].CreateDate)
+		})
+		flows = append(flows, *flow)
+	}
+
+	return flows, nil
 }

@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"database/sql"
-	"log"
 	"radiusgo/models"
 	"radiusgo/services"
 
@@ -25,7 +24,6 @@ func HandleGetHomerCalls(db *sql.DB) fiber.Handler {
 				"detail": err.Error(),
 			})
 		}
-		log.Println(calls)
 		return c.JSON(fiber.Map{
 			"calls": calls,
 		})
@@ -42,8 +40,7 @@ func HandleGetMessages(db *sql.DB) fiber.Handler {
 		}
 		messages := services.GetHomerMessages(callID, db)
 		return c.JSON(fiber.Map{
-			"call_id":  callID,
-			"messages": messages,
+			"data": messages,
 		})
 	}
 }
